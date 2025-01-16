@@ -1,0 +1,16 @@
+name: 🎉 Greetings 👋
+
+on: [pull_request_target, issues]
+
+jobs:
+  greeting:
+    runs-on: ubuntu-latest
+    permissions:
+      issues: write
+      pull-requests: write
+    steps:
+    - uses: actions/first-interaction@v1
+      with:
+        repo-token: ${{ secrets.GITHUB_TOKEN }}
+        issue-message: "✨ Welcome to the **🎮 Movie-to-Music Recommendation System 🎵** repository! Thank you for opening your first issue here. 🎉 We're excited to have you on board! 🚀"
+        pr-message: "🎊 Thank you for your first pull request to **🎮 Movie-to-Music Recommendation System 🎵**! We appreciate your contribution and look forward to reviewing it. 🛠️"
