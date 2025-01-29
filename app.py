@@ -6,6 +6,15 @@ from typing import List, Dict, Union
 from sklearn.feature_extraction.text import CountVectorizer
 from sklearn.metrics.pairwise import cosine_similarity
 from datetime import datetime
+import spotipy
+from spotipy.oauth2 import SpotifyClientCredentials
+
+# Set up credentials
+SPOTIFY_CLIENT_ID = "your_client_id"  # Such as  "ee3e7f4789a56c4e40a2a3fc8bc99d5e"
+SPOTIFY_CLIENT_SECRET =   "your_client_secret" # Such as"ee3e7f4789a56c4e40a2a3fc8bc99d5e"
+client_credentials_manager = SpotifyClientCredentials(client_id=SPOTIFY_CLIENT_ID, client_secret=SPOTIFY_CLIENT_SECRET)
+sp = spotipy.Spotify(client_credentials_manager=client_credentials_manager)
+
 
 
 st.set_page_config(
@@ -260,7 +269,20 @@ class GenreRecommendationSystem:
         return recommendations[['genres', 'track_names']].to_dict('records')
 
 
-
+def get_spotify_preview(track_name, limit=1):
+    results = sp.search(q=track_name, type='track', limit=limit)
+    
+    songs = []
+    for track in results['tracks']['items']:
+        song_data = {
+            "track_name": track["name"],
+            "spotify_url": track["external_urls"]["spotify"],
+            "preview_url": track["preview_url"],
+            "album_name": track["album"]["name"],
+        }
+        songs.append(song_data)
+    
+    return pd.DataFrame(songs)
 
 def save_tracks_to_file(file_path: str, tracks: List[Dict[str, Union[str, int]]]):
     with open(file_path, 'w') as file:
@@ -306,11 +328,17 @@ def render_recommendation_stats(saved_tracks: List[Dict]):
         )
         st.plotly_chart(fig)
 
+
+
 def render_track_recommendation(rec: Dict, index: int, movie_title: str, saved_tracks: List):
-    st.markdown('<div class="track-card">', unsafe_allow_html=True)
+    
+
     st.markdown(f'<div class="track-title">🎵 {rec["track_names"]}</div>', unsafe_allow_html=True)
     st.markdown(f'<div class="track-genre">Genre: {rec["genres"]}</div>', unsafe_allow_html=True)
-    
+    st.markdown('</div>', unsafe_allow_html=True)
+    #st.markdown(f"""<div class="track-card"><p>{get_spotify_preview(rec["track_names"])}</p>
+    #            </div>""", unsafe_allow_html=True)
+    st.dataframe(get_spotify_preview(rec["track_names"]))
     col1, col2 = st.columns([3, 1])
     with col1:
         rating = st.slider(
