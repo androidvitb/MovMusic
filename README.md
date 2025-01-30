@@ -12,7 +12,7 @@ A Python-based web application that recommends music tracks based on the genres 
 - **Music Genre Mapping**: Matches movie genres to related music genres.
 - **Music Recommendations**: Recommends tracks based on movie genres.
 - **User-Friendly Interface**: Interactive web app for easy usage.
-
+- **Link With Spotify**: For Song link is given by Spotify
 ---
 
 ## 🚀 Getting Started
@@ -75,6 +75,7 @@ A Python class that handles:
 - Loading and preprocessing movie and music datasets.
 - Mapping movie genres to related music genres.
 - Generating music recommendations.
+- Spotify link to listen the song 
 
 ### Streamlit Interface
 - Provides a user-friendly UI for entering inputs and displaying results.
