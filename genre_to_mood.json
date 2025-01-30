@@ -1,0 +1,50 @@
+{
+    "Action": [
+        "energetic",
+        "intense"
+    ],
+    "Drama": [
+        "emotional",
+        "reflective"
+    ],
+    "Comedy": [
+        "upbeat",
+        "light"
+    ],
+    "Horror": [
+        "dark",
+        "tense"
+    ],
+    "Romance": [
+        "gentle",
+        "warm"
+    ],
+    "Adventure": [
+        "exciting",
+        "dynamic"
+    ],
+    "Fantasy": [
+        "mystical",
+        "otherworldly"
+    ],
+    "Science Fiction": [
+        "futuristic",
+        "abstract"
+    ],
+    "Crime": [
+        "suspenseful",
+        "gritty"
+    ],
+    "Thriller": [
+        "suspenseful",
+        "high tension"
+    ],
+    "Animation": [
+        "whimsical",
+        "fun"
+    ],
+    "Family": [
+        "warm",
+        "heartfelt"
+    ]
+}

@@ -8,8 +8,11 @@ from sklearn.metrics.pairwise import cosine_similarity
 from datetime import datetime
 import spotipy
 from spotipy.oauth2 import SpotifyClientCredentials
+import os
+import joblib
+from fuzzywuzzy import process
 
-# Set up credentials
+# # Set up credentials
 SPOTIFY_CLIENT_ID = "your_client_id"  # Such as  "ee3e7f4789a56c4e40a2a3fc8bc99d5e"
 SPOTIFY_CLIENT_SECRET =   "your_client_secret" # Such as"ee3e7f4789a56c4e40a2a3fc8bc99d5e"
 client_credentials_manager = SpotifyClientCredentials(client_id=SPOTIFY_CLIENT_ID, client_secret=SPOTIFY_CLIENT_SECRET)
@@ -167,13 +170,33 @@ from sklearn.metrics.pairwise import cosine_similarity
 from typing import Union, List, Dict
 from difflib import get_close_matches
 
+def tokenizer_function(text):
+    return text.split(',')
+
+@st.cache_data
+def load_movies(path: str):
+    return pd.read_csv(path)
+
+@st.cache_data
+def load_music(path: str):
+    return pd.read_csv(path)
+
 class GenreRecommendationSystem:
     def __init__(self, movies_path: str, music_path: str):
+        self.vectorizer = CountVectorizer(tokenizer=tokenizer_function)
         self.movies_df = self._load_movie_data(movies_path)
         self.music_genres_df = self._load_music_data(music_path)
-        self.vectorizer = CountVectorizer(tokenizer=lambda x: x.split(','))
-        self.movie_genre_matrix = self._create_movie_genre_matrix()
-        self.music_genre_matrix = self._create_music_genre_matrix()
+
+        try:
+            self.vectorizer = joblib.load("loaded_data/vectorizer.joblib")
+            self.movie_genre_matrix = joblib.load("loaded_data/movie_matrix.joblib")
+            self.music_genre_matrix = joblib.load("loaded_data/music_matrix.joblib")
+        except:
+            self.movie_genre_matrix = self._create_movie_genre_matrix()
+            self.music_genre_matrix = self._create_music_genre_matrix()
+            joblib.dump(self.vectorizer, "loaded_data/vectorizer.joblib")
+            joblib.dump(self.movie_genre_matrix, "loaded_data/movie_matrix.joblib")
+            joblib.dump(self.music_genre_matrix, "loaded_data/music_matrix.joblib")
 
     def _load_movie_data(self, path: str) -> pd.DataFrame:
         try:
@@ -199,26 +222,18 @@ class GenreRecommendationSystem:
         music_genres_text = self.music_genres_df['genres'].apply(lambda x: ','.join(x))
         return self.vectorizer.transform(music_genres_text)
 
+
     def find_movie(self, movie_title: str) -> Union[None, pd.Series]:
-        matches = self.movies_df[self.movies_df['title'].str.contains(movie_title, case=False, na=False)]
-        return matches.iloc[0] if not matches.empty else None
+        best_match = process.extractOne(movie_title, self.movies_df["title"].tolist(), score_cutoff=80)
+        if best_match:
+            return self.movies_df[self.movies_df["title"] == best_match[0]].iloc[0]
+        return None
+
 
     def get_movie_mood(self, movie_genres: List[str]) -> List[str]:
-        # Define mood mapping for various genres
-        mood_mapping = {
-            'Action': ['energetic', 'intense'],
-            'Drama': ['emotional', 'reflective'],
-            'Comedy': ['upbeat', 'light'],
-            'Horror': ['dark', 'tense'],
-            'Romance': ['gentle', 'warm'],
-            'Adventure': ['exciting', 'dynamic'],
-            'Fantasy': ['mystical', 'otherworldly'],
-            'Science Fiction': ['futuristic', 'abstract'],
-            'Crime': ['suspenseful', 'gritty'],
-            'Thriller': ['suspenseful', 'high tension'],
-            'Animation': ['whimsical', 'fun'],
-            'Family': ['warm', 'heartfelt']
-        }
+        with open("genre_to_mood.json", "r") as f:
+            mood_mapping = json.load(f)
+
         moods = set()
         for genre in movie_genres:
             if genre in mood_mapping:
@@ -269,6 +284,7 @@ class GenreRecommendationSystem:
         return recommendations[['genres', 'track_names']].to_dict('records')
 
 
+
 def get_spotify_preview(track_name, limit=1):
     results = sp.search(q=track_name, type='track', limit=limit)
     
@@ -276,9 +292,11 @@ def get_spotify_preview(track_name, limit=1):
     for track in results['tracks']['items']:
         song_data = {
             "track_name": track["name"],
+            "artist": ", ".join([artist["name"] for artist in track["artists"]]),
             "spotify_url": track["external_urls"]["spotify"],
             "preview_url": track["preview_url"],
             "album_name": track["album"]["name"],
+            "album_cover": track["album"]["images"][0]["url"] if track["album"]["images"] else None
         }
         songs.append(song_data)
     
@@ -336,9 +354,14 @@ def render_track_recommendation(rec: Dict, index: int, movie_title: str, saved_t
     st.markdown(f'<div class="track-title">🎵 {rec["track_names"]}</div>', unsafe_allow_html=True)
     st.markdown(f'<div class="track-genre">Genre: {rec["genres"]}</div>', unsafe_allow_html=True)
     st.markdown('</div>', unsafe_allow_html=True)
-    #st.markdown(f"""<div class="track-card"><p>{get_spotify_preview(rec["track_names"])}</p>
-    #            </div>""", unsafe_allow_html=True)
-    st.dataframe(get_spotify_preview(rec["track_names"]))
+
+    spotify_data = get_spotify_preview(rec["track_names"])
+    if not spotify_data.empty:
+        track_info = spotify_data.iloc[0]
+        st.image(track_info["album_cover"], caption=track_info["album_name"], width=200)
+        st.write(f"🎵 {track_info['track_name']} - {track_info['artist']}")
+        st.markdown(f"[Listen on Spotify]({track_info['spotify_url']})")
+
     col1, col2 = st.columns([3, 1])
     with col1:
         rating = st.slider(
@@ -415,8 +438,7 @@ def main():
         render_recommendation_stats(saved_tracks)
         
         st.markdown("### 📝 Recently Saved")
-        recent_tracks = saved_tracks[-5:]
-        for track in recent_tracks:
+        for track in saved_tracks[-5:]:
             st.markdown(f"""
                 <div class="saved-track-card">
                     <strong>🎬 {track['movie']}</strong><br>
@@ -430,3 +452,4 @@ if __name__ == "__main__":
     recommender = GenreRecommendationSystem("tmdb_5000_movies.csv", "extended_data_by_genres.csv")
     saved_tracks = load_tracks_from_file("saved_tracks.txt")
     main()
+
