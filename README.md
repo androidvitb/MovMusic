@@ -13,7 +13,7 @@ A Python-based web application that recommends music tracks based on the genres 
 - **Music Recommendations**: Recommends tracks based on movie genres.
 - **User-Friendly Interface**: Interactive web app for easy usage.
 - **Link With Spotify**: For Song link is given by Spotify
----
+- **Info. of Song**: Model also give album,image,Link.
 
 ## 🚀 Getting Started
 
