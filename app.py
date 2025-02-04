@@ -1,4 +1,5 @@
 import streamlit as st
+import numpy as np
 import pandas as pd
 import json
 from difflib import get_close_matches
@@ -11,6 +12,15 @@ from spotipy.oauth2 import SpotifyClientCredentials
 import os
 import joblib
 from fuzzywuzzy import process
+import gensim
+import nltk
+from sklearn.feature_extraction.text import TfidfVectorizer
+from sklearn.metrics.pairwise import cosine_similarity
+from gensim.models import Word2Vec
+from nltk.tokenize import word_tokenize
+from typing import Union, List, Dict
+from difflib import get_close_matches
+import spacy
 
 # # Set up credentials
 SPOTIFY_CLIENT_ID = "your_client_id"  # Such as  "ee3e7f4789a56c4e40a2a3fc8bc99d5e"
@@ -156,22 +166,13 @@ st.markdown("""
     </style>
 """, unsafe_allow_html=True)
 
-import pandas as pd
-import json
-from sklearn.feature_extraction.text import CountVectorizer
-from sklearn.metrics.pairwise import cosine_similarity
-from typing import Union, List, Dict
-from difflib import get_close_matches
 
-import pandas as pd
-import json
-from sklearn.feature_extraction.text import CountVectorizer
-from sklearn.metrics.pairwise import cosine_similarity
-from typing import Union, List, Dict
-from difflib import get_close_matches
 
-def tokenizer_function(text):
-    return text.split(',')
+nlp = spacy.load("en_core_web_sm")
+def word_tokenize(text):
+    doc = nlp(text)
+    tokens = [token.lemma_.lower() for token in doc if not token.is_stop and not token.is_punct]
+    return tokens
 
 @st.cache_data
 def load_movies(path: str):
@@ -182,106 +183,108 @@ def load_music(path: str):
     return pd.read_csv(path)
 
 class GenreRecommendationSystem:
-    def __init__(self, movies_path: str, music_path: str):
-        self.vectorizer = CountVectorizer(tokenizer=tokenizer_function)
-        self.movies_df = self._load_movie_data(movies_path)
-        self.music_genres_df = self._load_music_data(music_path)
+    def __init__(self, movie_data_path="tmdb_5000_movies.csv", music_data_path="extended_data_by_genres.csv", model_path="word2vec.model"):
+        self.movie_data_path = movie_data_path
+        self.music_data_path = music_data_path
+        self.model_path = model_path
+        self.nlp = spacy.load("en_core_web_sm") 
 
-        try:
-            self.vectorizer = joblib.load("loaded_data/vectorizer.joblib")
-            self.movie_genre_matrix = joblib.load("loaded_data/movie_matrix.joblib")
-            self.music_genre_matrix = joblib.load("loaded_data/music_matrix.joblib")
-        except:
-            self.movie_genre_matrix = self._create_movie_genre_matrix()
-            self.music_genre_matrix = self._create_music_genre_matrix()
-            joblib.dump(self.vectorizer, "loaded_data/vectorizer.joblib")
-            joblib.dump(self.movie_genre_matrix, "loaded_data/movie_matrix.joblib")
-            joblib.dump(self.music_genre_matrix, "loaded_data/music_matrix.joblib")
+        # Load datasets
+        self.movies_df = pd.read_csv(self.movie_data_path)
+        self.music_df = pd.read_csv(self.music_data_path)
 
-    def _load_movie_data(self, path: str) -> pd.DataFrame:
-        try:
-            movies_df = pd.read_csv(path)
-            movies_df['genres'] = movies_df['genres'].apply(lambda x: [genre['name'] for genre in json.loads(x)])
-            return movies_df
-        except Exception as e:
-            raise ValueError(f"Error loading movie data: {e}")
+        # Preprocess genres
+        self.movies_df["processed_genres"] = self.movies_df["genres"].apply(self.preprocess_genres)
+        self.music_df["processed_genres"] = self.music_df["genres"].apply(lambda x: x.lower())
 
-    def _load_music_data(self, path: str) -> pd.DataFrame:
-        try:
-            return pd.read_csv(path)
-        except Exception as e:
-            raise ValueError(f"Error loading music data: {e}")
+        # Load or train Word2Vec model
+        self.word2vec_model = self.load_or_train_model()
 
-    def _create_movie_genre_matrix(self) -> pd.DataFrame:
-        # Vectorize movie genres using CountVectorizer
-        movie_genres_text = self.movies_df['genres'].apply(lambda x: ','.join(x))
-        return self.vectorizer.fit_transform(movie_genres_text)
+        # Generate genre embeddings
+        self.movies_df["genre_embeddings"] = self.movies_df["processed_genres"].apply(self.genre_vector)
+        self.music_df["genre_embeddings"] = self.music_df["processed_genres"].apply(self.genre_vector)
 
-    def _create_music_genre_matrix(self) -> pd.DataFrame:
-        # Vectorize music genres using CountVectorizer
-        music_genres_text = self.music_genres_df['genres'].apply(lambda x: ','.join(x))
-        return self.vectorizer.transform(music_genres_text)
-
-
-    def find_movie(self, movie_title: str) -> Union[None, pd.Series]:
-        best_match = process.extractOne(movie_title, self.movies_df["title"].tolist(), score_cutoff=80)
-        if best_match:
-            return self.movies_df[self.movies_df["title"] == best_match[0]].iloc[0]
-        return None
+        # Compute TF-IDF similarity matrix
+        self.tfidf = TfidfVectorizer()
+        self.tfidf_matrix = self.tfidf.fit_transform(self.movies_df["processed_genres"])
+        self.genre_sim_matrix = cosine_similarity(self.tfidf_matrix)
 
 
     def get_movie_mood(self, movie_genres: List[str]) -> List[str]:
         with open("genre_to_mood.json", "r") as f:
             mood_mapping = json.load(f)
-
         moods = set()
         for genre in movie_genres:
             if genre in mood_mapping:
                 moods.update(mood_mapping[genre])
         return list(moods)
-
-    def get_related_music_genres(self, movie_genres: List[str]) -> List[str]:
-            # Create the vector for the movie genres
-            movie_genre_text = ','.join(movie_genres)
-            movie_vector = self.vectorizer.transform([movie_genre_text])
-            
-            # Compute cosine similarities between the movie and all music genres
-            similarities = cosine_similarity(movie_vector, self.music_genre_matrix).flatten()
-            
-            # Get the indices of the top 5 most similar music genres
-            related_indices = similarities.argsort()[-5:][::-1]
-            
-            # Log the related indices and the top genres
-            print("Related indices:", related_indices)
-            print("Top related genres:", self.music_genres_df.iloc[related_indices]['genres'].tolist())
-            
-            # Return the top related genres
-            return self.music_genres_df.iloc[related_indices]['genres'].tolist()
-
-    def recommend_music_based_on_movie(self, movie_title: str, num_recommendations: int = 5, 
-                                     genre_filter: List[str] = None) -> Union[List[Dict[str, str]], str]:
-        movie = self.find_movie(movie_title)
-        if movie is None:
-            return f"Movie not found. Did you mean one of these: {', '.join(get_close_matches(movie_title, self.movies_df['title'].tolist(), n=3))}?"
-
-        movie_genres = movie['genres']
-        related_music_genres = self.get_related_music_genres(movie_genres)
+    def find_movie(self, movie_title: str) -> Union[None, pd.Series]:
+        best_match = process.extractOne(movie_title, self.movies_df["title"].tolist(), score_cutoff=80)
+        if best_match:
+            return self.movies_df[self.movies_df["title"] == best_match[0]].iloc[0]
+        return None
         
-        if not related_music_genres:
-            return "No matching music genres found for this movie's genres."
-            
-        if genre_filter:
-            related_music_genres = [genre for genre in related_music_genres if genre in genre_filter]
-            
-        matching_music = self.music_genres_df[
-            self.music_genres_df['genres'].str.lower().isin([g.lower() for g in related_music_genres])
-        ]
+    def preprocess_genres(self, genres_str):
+        """
+        Extracts genre names from a JSON string and returns a space-separated string of genres.
+        """
+        try:
+            genres_list = [genre["name"].lower() for genre in json.loads(genres_str)]
+            return " ".join(genres_list)
+        except:
+            return ""
+
+    def word_tokenize(self, text):
+        """
+        Tokenizes input text using SpaCy.
+        Removes stop words and punctuation and returns lemmatized tokens.
+        """
+        doc = self.nlp(text)
+        tokens = [token.lemma_.lower() for token in doc if not token.is_stop and not token.is_punct]
+        return tokens
+
+    def load_or_train_model(self):
+        """
+        Loads an existing Word2Vec model if available, otherwise trains a new one and saves it.
+        """
+        if os.path.exists(self.model_path):
+            print("Loaded existing Word2Vec model.")
+            return Word2Vec.load(self.model_path)
         
-        if matching_music.empty:
-            return "No music recommendations found for the related genres."
-            
-        recommendations = matching_music.sample(n=min(num_recommendations, len(matching_music)))
-        return recommendations[['genres', 'track_names']].to_dict('records')
+        print("Training new Word2Vec model...")
+        all_genres = self.movies_df["processed_genres"].tolist() + self.music_df["processed_genres"].tolist()
+        tokenized_genres = [self.word_tokenize(genres) for genres in all_genres]
+
+        model = Word2Vec(sentences=tokenized_genres, vector_size=100, window=5, min_count=1, workers=4)
+        model.save(self.model_path)
+        print("New Word2Vec model trained and saved.")
+        return model
+
+    def genre_vector(self, genre_text):
+        """
+        Converts a genre text into a numerical vector using the trained Word2Vec model.
+        """
+        words = self.word_tokenize(genre_text)
+        vectors = [self.word2vec_model.wv[word] for word in words if word in self.word2vec_model.wv]
+        return np.mean(vectors, axis=0) if vectors else np.zeros(100)
+
+    def recommend_music(self, movie_title, num_recommendations=5):
+        """
+        Given a movie title, recommends the top N music tracks based on genre similarity.
+        """
+        idx = self.movies_df[self.movies_df["title"].str.lower() == movie_title.lower()].index
+        if len(idx) == 0:
+            return "Movie not found!"
+        
+        idx = idx[0]
+        movie_vector = self.movies_df.iloc[idx]["genre_embeddings"]
+
+        # Compute similarity with music tracks
+        similarities = cosine_similarity([movie_vector], np.stack(self.music_df["genre_embeddings"].values))[0]
+        top_indices = np.argsort(similarities)[::-1][:num_recommendations]
+        
+        return self.music_df.iloc[top_indices]["track_names"].tolist()
+
 
 
 
@@ -349,13 +352,12 @@ def render_recommendation_stats(saved_tracks: List[Dict]):
 
 
 def render_track_recommendation(rec: Dict, index: int, movie_title: str, saved_tracks: List):
-    
 
-    st.markdown(f'<div class="track-title">🎵 {rec["track_names"]}</div>', unsafe_allow_html=True)
-    st.markdown(f'<div class="track-genre">Genre: {rec["genres"]}</div>', unsafe_allow_html=True)
+    st.markdown(f'<div class="track-title">🎵 {rec}</div>', unsafe_allow_html=True)
+    st.markdown(f'<div class="track-genre">Genre: {rec}</div>', unsafe_allow_html=True)
     st.markdown('</div>', unsafe_allow_html=True)
 
-    spotify_data = get_spotify_preview(rec["track_names"])
+    spotify_data = get_spotify_preview(rec)
     if not spotify_data.empty:
         track_info = spotify_data.iloc[0]
         st.image(track_info["album_cover"], caption=track_info["album_name"], width=200)
@@ -385,6 +387,7 @@ def render_track_recommendation(rec: Dict, index: int, movie_title: str, saved_t
             st.success("✅ Track saved!")
     
     st.markdown('</div>', unsafe_allow_html=True)
+
 
 def main():
     st.markdown('<h1 class="main-header">Movie-to-Music Recommender</h1>', unsafe_allow_html=True)
@@ -418,10 +421,10 @@ def main():
                 st.markdown("### 🎬 Movie Details")
                 render_movie_insights(movie)
                 
-                recommendations = recommender.recommend_music_based_on_movie(
+                recommendations = recommender.recommend_music(
                     movie_title,
-                    num_recommendations=num_recommendations,
-                    genre_filter=genre_filter
+                    num_recommendations=num_recommendations
+                    
                 )
                 
                 if isinstance(recommendations, str):
