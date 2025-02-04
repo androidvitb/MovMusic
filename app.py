@@ -23,8 +23,8 @@ from difflib import get_close_matches
 import spacy
 
 # # Set up credentials
-SPOTIFY_CLIENT_ID = "dd3e7f12d5804e40a2a3fc8bc99de7af"  # Such as  "ee3e7f4789a56c4e40a2a3fc8bc99d5e"
-SPOTIFY_CLIENT_SECRET =   "7d6c642d58ae48c3925fa00f1cdfc433" # Such as"ee3e7f4789a56c4e40a2a3fc8bc99d5e"
+SPOTIFY_CLIENT_ID = "your_client_id"  # Such as  "ee3e7f4789a56c4e40a2a3fc8bc99d5e"
+SPOTIFY_CLIENT_SECRET =   "your_client_secret" # Such as"ee3e7f4789a56c4e40a2a3fc8bc99d5e"
 client_credentials_manager = SpotifyClientCredentials(client_id=SPOTIFY_CLIENT_ID, client_secret=SPOTIFY_CLIENT_SECRET)
 sp = spotipy.Spotify(client_credentials_manager=client_credentials_manager)
 
