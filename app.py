@@ -23,8 +23,8 @@ from difflib import get_close_matches
 import spacy
 
 # # Set up credentials
-SPOTIFY_CLIENT_ID = "your_client_id"  # Such as  "ee3e7f4789a56c4e40a2a3fc8bc99d5e"
-SPOTIFY_CLIENT_SECRET =   "your_client_secret" # Such as"ee3e7f4789a56c4e40a2a3fc8bc99d5e"
+SPOTIFY_CLIENT_ID = "acc33b2088c041628c9f94386ca2a6ed"  # Such as  "ee3e7f4789a56c4e40a2a3fc8bc99d5e"
+SPOTIFY_CLIENT_SECRET =   "03ab90d72355453098a5db05bf4cff68" # Such as"ee3e7f4789a56c4e40a2a3fc8bc99d5e"
 client_credentials_manager = SpotifyClientCredentials(client_id=SPOTIFY_CLIENT_ID, client_secret=SPOTIFY_CLIENT_SECRET)
 sp = spotipy.Spotify(client_credentials_manager=client_credentials_manager)
 
@@ -182,6 +182,38 @@ def load_movies(path: str):
 def load_music(path: str):
     return pd.read_csv(path)
 
+
+def render_movie_recommendation(rec: Dict, index: int, track_name: str, saved_movies: List):
+    st.markdown(f'<div class="movie-card">', unsafe_allow_html=True)
+    
+    st.markdown(f'### {rec["title"]}')
+    st.write(f'⭐ Rating: {rec["vote_average"]:.1f}')
+    st.write(f'📈 Popularity: {int(rec["popularity"])}')
+    st.write(rec["overview"])
+
+    col1, col2 = st.columns([3, 1])
+    with col1:
+        rating = st.slider(
+            "Rate this movie",
+            1, 5, 3,
+            key=f"movie_rating_{index}_{track_name}",
+            help="1 = Poor, 5 = Excellent"
+        )
+    
+    with col2:
+        if st.button("💾 Save", key=f"save_movie_{index}_{track_name}"):
+            movie_data = {
+                'track': track_name,
+                'movie': rec['title'],
+                'rating': rating,
+                'timestamp': datetime.now().isoformat()
+            }
+            saved_movies.append(movie_data)
+            save_tracks_to_file("saved_movies.txt", saved_movies)
+            st.success("✅ Movie saved!")
+    
+    st.markdown('</div>', unsafe_allow_html=True)
+
 class GenreRecommendationSystem:
     def __init__(self, movie_data_path="tmdb_5000_movies.csv", music_data_path="extended_data_by_genres.csv", model_path="word2vec.model"):
         self.movie_data_path = movie_data_path
@@ -286,6 +318,32 @@ class GenreRecommendationSystem:
         return self.music_df.iloc[top_indices]["track_names"].tolist()
 
 
+class BidirectionalRecommendationSystem(GenreRecommendationSystem):
+    def __init__(self, movie_data_path="tmdb_5000_movies.csv", music_data_path="extended_data_by_genres.csv", model_path="word2vec.model"):
+        super().__init__(movie_data_path, music_data_path, model_path)
+        
+    def find_track(self, track_name: str) -> Union[None, pd.Series]:
+        best_match = process.extractOne(track_name, self.music_df["track_names"].tolist(), score_cutoff=80)
+        if best_match:
+            return self.music_df[self.music_df["track_names"] == best_match[0]].iloc[0]
+        return None
+
+    def recommend_movies(self, track_name: str, num_recommendations=5):
+        """
+        Given a music track name, recommends the top N movies based on genre similarity.
+        """
+        idx = self.music_df[self.music_df["track_names"].str.lower() == track_name.lower()].index
+        if len(idx) == 0:
+            return "Track not found!"
+        
+        idx = idx[0]
+        track_vector = self.music_df.iloc[idx]["genre_embeddings"]
+
+        # Compute similarity with movies
+        similarities = cosine_similarity([track_vector], np.stack(self.movies_df["genre_embeddings"].values))[0]
+        top_indices = np.argsort(similarities)[::-1][:num_recommendations]
+        
+        return self.movies_df.iloc[top_indices][["title", "overview", "vote_average", "popularity"]].to_dict('records')
 
 
 def get_spotify_preview(track_name, limit=1):
@@ -390,69 +448,127 @@ def render_track_recommendation(rec: Dict, index: int, movie_title: str, saved_t
 
 
 def main():
-    st.markdown('<h1 class="main-header">Movie-to-Music Recommender</h1>', unsafe_allow_html=True)
+    st.markdown('<h1 class="main-header">Movie-and-Music Recommender</h1>', unsafe_allow_html=True)
     
+    mode = st.radio("Select Mode", ["Movie → Music", "Music → Movies"], horizontal=True)
+
     with st.sidebar:
         st.markdown("### 🎯 Preferences")
         num_recommendations = st.slider("Number of recommendations", 3, 10, 5)
-        min_rating = st.slider("Minimum movie rating", 0.0, 10.0, 7.0)
         
-        st.markdown("### 🎵 Genre Filters")
-        genre_filter = st.multiselect(
-            "Filter music genres",
-            options=[
-                'electronic', 'rock', 'epic', 'bass music', 'drum and bass',
-                'world', 'cinematic', 'orchestral', 'folk', 'classical',
-                'ambient', 'abstract', 'pop', 'vocal', 'acoustic'
-            ]
-        )
+        if mode == "Movie → Music":
+            min_rating = st.slider("Minimum movie rating", 0.0, 10.0, 7.0)
+            st.markdown("### 🎵 Genre Filters")
+            genre_filter = st.multiselect(
+                "Filter music genres",
+                options=[
+                    'electronic', 'rock', 'epic', 'bass music', 'drum and bass',
+                    'world', 'cinematic', 'orchestral', 'folk', 'classical',
+                    'ambient', 'abstract', 'pop', 'vocal', 'acoustic'
+                ]
+            )
+        else:
+            min_rating = st.slider("Minimum track popularity", 0.0, 100.0, 70.0)
+            st.markdown("### 🎬 Movie Filters")
+            movie_genre_filter = st.multiselect(
+                "Filter movie genres",
+                options=[
+                    'Action', 'Adventure', 'Animation', 'Comedy', 'Crime',
+                    'Documentary', 'Drama', 'Family', 'Fantasy', 'History',
+                    'Horror', 'Music', 'Mystery', 'Romance', 'Science Fiction',
+                    'Thriller', 'War', 'Western'
+                ]
+            )
+
     col1, col2 = st.columns([2, 1])
     
     with col1:
-        movie_title = st.text_input(
-            "",
-            placeholder="Enter a movie title (e.g., The Dark Knight, Avatar, Inception...)",
-            help="Type the name of a movie to get music recommendations"
-        )
-        
-        if movie_title:
-            movie = recommender.find_movie(movie_title)
-            if movie is not None:
-                st.markdown("### 🎬 Movie Details")
-                render_movie_insights(movie)
-                
-                recommendations = recommender.recommend_music(
-                    movie_title,
-                    num_recommendations=num_recommendations
+        if mode == "Movie → Music":
+            movie_title = st.text_input(
+                "",
+                placeholder="Enter a movie title (e.g., The Dark Knight, Avatar, Inception...)",
+                help="Type the name of a movie to get music recommendations"
+            )
+            
+            if movie_title:
+                movie = recommender.find_movie(movie_title)
+                if movie is not None:
+                    st.markdown("### 🎬 Movie Details")
+                    render_movie_insights(movie)
                     
-                )
-                
-                if isinstance(recommendations, str):
-                    st.warning(recommendations)
+                    recommendations = recommender.recommend_music(
+                        movie_title,
+                        num_recommendations=num_recommendations
+                    )
+                    
+                    if isinstance(recommendations, str):
+                        st.warning(recommendations)
+                    else:
+                        st.markdown("### 🎵 Recommended Tracks")
+                        for i, rec in enumerate(recommendations, 1):
+                            render_track_recommendation(rec, i, movie_title, saved_tracks)
                 else:
-                    st.markdown("### 🎵 Recommended Tracks")
-                    for i, rec in enumerate(recommendations, 1):
-                        render_track_recommendation(rec, i, movie_title, saved_tracks)
-            else:
-                st.error("Movie not found. Please try another title.")
+                    st.error("Movie not found. Please try another title.")
+        
+        else:  # Music → Movies mode
+            track_name = st.text_input(
+                "",
+                placeholder="Enter a music track name",
+                help="Type the name of a song to get movie recommendations"
+            )
+            
+            if track_name:
+                track = recommender.find_track(track_name)
+                if track is not None:
+                    st.markdown("### 🎵 Track Details")
+                    spotify_data = get_spotify_preview(track["track_names"])
+                    if not spotify_data.empty:
+                        track_info = spotify_data.iloc[0]
+                        st.image(track_info["album_cover"], caption=track_info["album_name"], width=200)
+                        st.write(f"🎵 {track_info['track_name']} - {track_info['artist']}")
+                        st.markdown(f"[Listen on Spotify]({track_info['spotify_url']})")
+                    
+                    recommendations = recommender.recommend_movies(
+                        track_name,
+                        num_recommendations=num_recommendations
+                    )
+                    
+                    if isinstance(recommendations, str):
+                        st.warning(recommendations)
+                    else:
+                        st.markdown("### 🎬 Recommended Movies")
+                        for i, rec in enumerate(recommendations, 1):
+                            render_movie_recommendation(rec, i, track_name, saved_movies)
+                else:
+                    st.error("Track not found. Please try another title.")
     
     with col2:
-        st.markdown("### 📊 Your Music Stats")
-        render_recommendation_stats(saved_tracks)
-        
-        st.markdown("### 📝 Recently Saved")
-        for track in saved_tracks[-5:]:
-            st.markdown(f"""
-                <div class="saved-track-card">
-                    <strong>🎬 {track['movie']}</strong><br>
-                    🎵 {track['track']}<br>
-                    🎯 {track['genre']}<br>
-                    ⭐ {"★" * track['rating']}{"☆" * (5-track['rating'])}
-                </div>
-            """, unsafe_allow_html=True)
+        st.markdown("### 📊 Your Stats")
+        if mode == "Movie → Music":
+            render_recommendation_stats(saved_tracks)
+            st.markdown("### 📝 Recently Saved Tracks")
+            for track in saved_tracks[-5:]:
+                st.markdown(f"""
+                    <div class="saved-track-card">
+                        <strong>🎬 {track['movie']}</strong><br>
+                        🎵 {track['track']}<br>
+                        🎯 {track['genre']}<br>
+                        ⭐ {"★" * track['rating']}{"☆" * (5-track['rating'])}
+                    </div>
+                """, unsafe_allow_html=True)
+        else:
+            st.markdown("### 📝 Recently Saved Movies")
+            for movie in saved_movies[-5:]:
+                st.markdown(f"""
+                    <div class="saved-movie-card">
+                        <strong>🎵 {movie['track']}</strong><br>
+                        🎬 {movie['movie']}<br>
+                        ⭐ {"★" * movie['rating']}{"☆" * (5-track['rating'])}
+                    </div>
+                """, unsafe_allow_html=True)
 
 if __name__ == "__main__":
-    recommender = GenreRecommendationSystem("tmdb_5000_movies.csv", "extended_data_by_genres.csv")
+    recommender = BidirectionalRecommendationSystem("tmdb_5000_movies.csv", "extended_data_by_genres.csv")
     saved_tracks = load_tracks_from_file("saved_tracks.txt")
+    saved_movies = load_tracks_from_file("saved_movies.txt")
     main()
-
